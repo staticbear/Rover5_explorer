@@ -1,0 +1,8 @@
+gpio12 - camera vertical servo motor pwm
+gpio13 - camera horizontal servo motor pwm 
+gpio16 - camera ligh control push pull
+gpio17 - chassis both enable push pull (generated pwm)
+gpio18 - chassis 1 direction IN1 push pull 
+gpio19 - chassis 1 direction IN2 push pull 
+gpio20 - chassis 2 direction IN3 push pull 
+gpio21 - chassis 2 direction IN4 push pull 
