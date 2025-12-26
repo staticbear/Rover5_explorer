@@ -48,4 +48,14 @@ enum PIN_STATE
 
 
 
+#define ANSW_CAMERA_XY_SET_ERR  (1 << 0)
+
+#define ANSW_LIGHT_CTRL_ERR  	(1 << 0)
+#define ANSW_LIGHT_WRND_SIZE 	(1 << 1)
+
+#define ANSW_CHASSIS_WRNG_PWM  	(1 << 0)
+#define ANSW_CHASSIS_DIR_ERR  	(1 << 1)
+#define ANSW_CHASSIS_PWM_L_ERR  (1 << 2)
+#define ANSW_CHASSIS_PWM_H_ERR  (1 << 3)
+
 #endif

@@ -26,7 +26,7 @@
 #define CAMERA_XY_RANGE 1200000
 #define CAMERA_XY_MIN	30000
 
-extern FIFO_T net_fifo;
+extern FIFO_T tcp_fifo_send;
 extern FIFO_T light_fifo;
 extern FIFO_T chassis_fifo;
 extern FIFO_T camera_xy_fifo;
@@ -319,12 +319,18 @@ void GpioCameraXYDispatcher()
 		if(common_packet->data_size == sizeof(CAMERA_XY_DATA_T))
 		{
 			CAMERA_XY_DATA_T *camara_xy_data = (CAMERA_XY_DATA_T*)common_packet->ptr_data;
-			GpioCameraXYSet(camara_xy_data->x_pwm, camara_xy_data->y_pwm);
+			ret = GpioCameraXYSet(camara_xy_data->x_pwm, camara_xy_data->y_pwm);
+			if(ret != 0)
+				common_packet->ptr_data[0] = REQUEST_OK | ANSW_CAMERA_XY_SET_ERR;
+			else
+				common_packet->ptr_data[0] = REQUEST_OK;
 		}
 		
-		ret = FifoPush(&net_fifo, item);
+		common_packet->data_size = 1;
+		
+		ret = FifoPush(&tcp_fifo_send, item);
 		if(ret != 0){
-			printf("[%s], can't release net fifo item, stop everything..\n", __func__);
+			printf("[%s], can't push into tcp_fifo_send, stop everything..\n", __func__);
 			atomic_store(&flag_stop, 1);
 			break;
 		}
@@ -355,13 +361,25 @@ void GpioLightDispatcher()
 			LIGHT_DATA_T *ligh_data_array = (LIGHT_DATA_T*)common_packet->ptr_data;
 			for(int i = 0; i < array_cnt; i++)
 			{
-				GpioLightControl(ligh_data_array[i].cam_id, ligh_data_array[i].cam_val);
+				ret = GpioLightControl(ligh_data_array[i].cam_id, ligh_data_array[i].cam_val);
+				if(ret != 0){
+					printf("[%s], GpioLightControl error, i = %d\n", __func__, i);
+					common_packet->ptr_data[0] = REQUEST_OK | ANSW_LIGHT_CTRL_ERR;
+					break;
+				}
+				common_packet->ptr_data[0] = REQUEST_OK;
 			}
 		}
+		else{
+			printf("[%s], problem with data size = %d\n", __func__, common_packet->data_size);
+			common_packet->ptr_data[0] = REQUEST_OK | ANSW_LIGHT_WRND_SIZE;
+		}
 		
-		ret = FifoPush(&net_fifo, item);
+		common_packet->data_size = 1;
+		
+		ret = FifoPush(&tcp_fifo_send, item);
 		if(ret != 0){
-			printf("[%s], can't release net fifo item, stop everything..\n", __func__);
+			printf("[%s], can't push into tcp_fifo_send, stop everything..\n", __func__);
 			atomic_store(&flag_stop, 1);
 			break;
 		}
@@ -374,38 +392,39 @@ void GpioLightDispatcher()
 void GpioChassisDispatcher()
 {
 	int ret;
+	uint8_t answ_code;
 	uint32_t no_cmd_cnt = 0;
 	int pwm_cnt = 0;
 	int pwm_pol_cnt = 0;
 	int pwm_pol_upd = 0;
 	int pwm_pin_state = LOW;
+	NODE_T *item = 0;
+	COMMON_PACKET_T *common_packet;
 	
 	while(!flag_stop)
 	{
 		if(pwm_cnt == PWM_MAX){
 			
-			NODE_T *item = FifoPop(&chassis_fifo);
+			item = FifoPop(&chassis_fifo);
 			if(item){
 				
-				COMMON_PACKET_T *common_packet = (COMMON_PACKET_T *)item->ptr_mem;
+				common_packet = (COMMON_PACKET_T *)item->ptr_mem;
 				CHASSIS_DATA_T *chassis_data = (CHASSIS_DATA_T*)common_packet->ptr_data;
+				
+				answ_code = REQUEST_OK;
 				
 				//set chassis direction
 				if(chassis_data->pwm_pol > PWM_MAX || chassis_data->pwm_pol < 0){
 					printf("[%s], wrong pwm value = %d\n", __func__, chassis_data->pwm_pol);
+					answ_code |= ANSW_CHASSIS_WRNG_PWM;
 					pwm_pol_cnt = 0;
 				}
 				else
 					pwm_pol_cnt = chassis_data->pwm_pol;
 				
-				GpioChassisDirection(chassis_data->chassis1_dir, chassis_data->chassis2_dir);
-				
-				ret = FifoPush(&net_fifo, item);
-				if(ret != 0){
-					printf("[%s], can't release net fifo item, stop everything..\n", __func__);
-					atomic_store(&flag_stop, 1);
-					break;
-				}
+				ret = GpioChassisDirection(chassis_data->chassis1_dir, chassis_data->chassis2_dir);
+				if(ret != 0)
+					answ_code |= ANSW_CHASSIS_DIR_ERR;
 				
 				no_cmd_cnt = 0;
 				pwm_pol_upd = pwm_pol_cnt;
@@ -417,11 +436,13 @@ void GpioChassisDispatcher()
 			
 			if(pwm_pol_cnt){
 				pwm_pin_state = HIGH;
-				GpioChassisPwmControl(HIGH);
+				if(GpioChassisPwmControl(HIGH) != 0)
+					answ_code |= ANSW_CHASSIS_PWM_H_ERR;
 			}
 			else{
 				pwm_pin_state = LOW;
-				GpioChassisPwmControl(LOW);
+				if(GpioChassisPwmControl(LOW) != 0)
+					answ_code |= ANSW_CHASSIS_PWM_L_ERR;
 			}
 			pwm_cnt = 0;
 		}
@@ -435,6 +456,20 @@ void GpioChassisDispatcher()
 			}
 				
 			pwm_cnt++;
+		}
+		
+		
+		// push answer
+		if(item){
+			common_packet->ptr_data[0] = answ_code;
+			common_packet->data_size = 1;
+			ret = FifoPush(&tcp_fifo_send, item);
+			if(ret != 0){
+				printf("[%s], can't push into tcp_fifo_send, stop everything..\n", __func__);
+				atomic_store(&flag_stop, 1);
+				break;
+			}
+			item = 0;
 		}
 		
 		// if there are no commands in one seconds stop motor

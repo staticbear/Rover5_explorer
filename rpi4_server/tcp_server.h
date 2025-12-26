@@ -9,14 +9,11 @@
 #include <poll.h>
 #include <stdatomic.h>
 
-#define PORT 8080
-
 #define RAW_BUFFER_SIZE 1024
 
 int CreateTcpServer();
-void TcpDispatcher();
+void TcpRecvDispatcher();
 void DeleteTcpServer();
-
-//void Test();
+void TcpSendDispatcher();
 
 #endif
